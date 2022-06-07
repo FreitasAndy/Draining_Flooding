@@ -1,0 +1,170 @@
+---
+title: "Drained_Flooded"
+author: "Anderson Freitas"
+date: "11/04/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+It's dada2 time.
+
+Starting with the path selection.
+
+```{r}
+
+library(dada2); packageVersion("dada2")
+
+#directory containing the fastq files after unzipping
+
+path = "/media/biomol/ESD-USB/Rice/Seqs"
+list.files(path)
+
+# read in the names of the fastq files.
+fnFs <- sort(list.files(path, pattern="_.fastq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_.f"), `[`, 1)
+
+# Here are the Bacterial sequences
+sample.names
+#fnFs
+#There is no HC5
+
+```
+
+Now plotting the sequencing quality
+
+```{r}
+
+plotQualityProfile(fnFs[c(23,55:57)]) 
+
+```
+
+Now filtering and trimming data.
+
+```{r}
+
+# Compressing the seq files to downstream cut
+
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_filt.fastq.gz"))
+
+out <- filterAndTrim(fnFs, filtFs, truncLen=c(280), 
+                     trimLeft=c(25), maxN=0, maxEE=c(2), truncQ=2,
+                     rm.phix=TRUE, compress=TRUE, multithread=TRUE)
+head(out)
+
+```
+LC9 has not passed in the filtering. 86 samples remaining.
+
+Now plotting new quality graphs.
+
+```{r}
+
+# Plotting quality graphs again for the now cutted sequences.n.
+
+filtpath <- "/media/biomol/ESD-USB/Rice/Seqs/filtered/"
+filts <- list.files(filtpath, pattern="fastq.gz", full.names=TRUE)
+plotQualityProfile(filts[1:4])
+
+```
+
+Now leraning error rates.
+
+
+```{r}
+
+sample.names <- sapply(strsplit(basename(filts), "_"), `[`, 1)
+names(filts) <- sample.names
+
+# Learn error rates
+set.seed(2125)
+err <- learnErrors(filts, nbases = 1e+08, multithread=TRUE, randomize=TRUE)
+
+plotErrors(err, nominalQ=TRUE)
+
+```
+
+Now dereplication.
+
+
+```{r}
+
+derepFs <- derepFastq(filts, verbose=F)
+# Name the derep-class objects by the sample names
+names(derepFs) <- sample.names
+names(derepFs)
+
+```
+Now the sample inference.
+
+```{r}
+
+dadaFs <- dada(derepFs, err=err, multithread=TRUE)
+
+```
+
+
+Now making sequence table.
+
+```{r}
+
+seqtab <- makeSequenceTable(dadaFs)
+
+dim(seqtab)
+
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab)))
+
+```
+
+Now removing chimeras.
+
+```{r}
+
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)
+
+saveRDS(seqtab.nochim, "/media/biomol/ESD-USB/Rice/seqtab_final_new.rds")
+
+```
+That's ok.
+
+Now we will check how much sequences we lost in the whole pipeline.
+
+```{r}
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoised", "nonchim")
+head(track)
+
+```
+
+We lost a lot of sequences, but we still have a good number of reads.
+
+Now we will add the taxonomy.
+
+```{r}
+
+#adding taxonomy
+
+taxa <- assignTaxonomy(seqtab.nochim,
+                       "/media/biomol/ESD-USB/Rice/silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE, tryRC = TRUE)
+
+taxa.print <- taxa
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+saveRDS(taxa, "/media/biomol/ESD-USB/Rice/taxtable_new.rds")
+
+```
+
+Now we will proceed to the analysis with the objects "seqtab" and "taxa".
+
+
+
+
+
