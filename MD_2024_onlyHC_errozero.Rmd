@@ -1,0 +1,721 @@
+---
+title: "Drained-Flooded"
+author: "Anderson Freitas"
+date: "13/04/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Step zero: cosmetics.
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(hrbrthemes)
+library(file2meco)
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+library(microeco)
+library(corrplot)
+library(ALDEx2)
+
+
+theme_set(theme_bw())
+pal = "Set3"
+scale_colour_discrete <-  function(palname=pal, ...){
+  scale_colour_brewer(palette=palname, ...)
+}
+scale_fill_discrete <-  function(palname=pal, ...){
+  scale_fill_brewer(palette=palname, ...)
+}
+
+
+```
+
+
+#First step: descriptives.
+
+```{r}
+
+library(readr)
+data_df <- read_delim("./descriptive.txt", delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+
+library(tidyverse)
+library(dplyr)
+
+data.df       = data_df %>% group_by(Soil)
+
+Means   = data.df %>% summarise_if(is.numeric, mean)
+SD      = data.df %>% summarise_if(is.numeric, sd)
+
+mpsd    = rbind(Means, SD)
+
+#mpsd$Soil
+
+mpsd$Data = c("Mean", "Mean", "SD", "SD")
+
+mpsd
+
+```
+
+#Second step: test differences between descriptives.
+
+```{r}
+
+colnames(data.df)
+dim(data.df)
+
+norm.df = lapply(data.df[2:10], shapiro.test)
+
+norm.df
+
+#Not normal-distributted. Kruskal-Walis will be the choice
+
+library(broom)
+
+KW.test <- data.df %>% gather(key, value, -Soil) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x= .$value, g = .$Soil)))
+
+KW.test
+
+#Data from "mpsd" and "KW.test" will be used for the construction of a table.
+
+```
+
+#Third step: the evolution of pH and EC during the experiment.
+
+```{r}
+#I used a function to extract mean and SD and plotted line graphs to show the evolution of pH and EC during the experiment
+
+#The function "summarySE"
+#############################################
+
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+  library(plyr)
+  
+  # New version of length which can handle NA's: if na.rm==T, don't count them
+  length2 <- function (x, na.rm=FALSE) {
+    if (na.rm) sum(!is.na(x))
+    else       length(x)
+  }
+  
+  # This does the summary. For each group's data frame, return a vector with
+  # N, mean, and sd
+  datac <- ddply(data, groupvars, .drop=.drop,
+                 .fun = function(xx, col) {
+                   c(N    = length2(xx[[col]], na.rm=na.rm),
+                     mean = mean   (xx[[col]], na.rm=na.rm),
+                     sd   = sd     (xx[[col]], na.rm=na.rm)
+                   )
+                 },
+                 measurevar
+  )
+  
+  # Rename the "mean" column    
+  datac <- plyr::rename(datac, c("mean" = measurevar))
+  
+  datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+  
+  # Confidence interval multiplier for standard error
+  # Calculate t-statistic for confidence interval: 
+  # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+  ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+  datac$ci <- datac$se * ciMult
+  
+  return(datac)
+}
+
+#############################################
+
+library(readxl)
+Map_T <- read_excel("./Map_T.xlsx")
+#View(Map_T)
+
+
+#library(readxl)
+rects <- read_excel("./rects.xlsx")
+#View(rects)
+
+rects$Colors = c("#926829", "lightblue","#926829",
+                 "lightblue","#926829","lightblue","#926829", 
+                 "lightblue","#926829", "lightblue","#926829")
+                 
+
+
+tgc <- summarySE(filter(Map_T, Soil == "HighCarbon"), measurevar="pH", groupvars=c("Soil","Condition","Cycle"))
+tgc2 <- summarySE(filter(Map_T, Soil == "HighCarbon"), measurevar="EC", groupvars=c("Soil","Condition","Cycle"))
+
+#pH
+
+pH.plot = 
+  ggplot() + 
+  geom_rect(data = rects, aes(xmin = xstart, xmax = xend, ymin = -Inf,
+                              ymax = Inf, fill = Condition),
+                              fill = rects$Colors, alpha = 0.6) +
+  geom_line(data = tgc, aes(x=Cycle, y=pH, color=Soil), alpha = 0.9, color = "black") +
+  geom_errorbar(data = tgc,
+                aes(x=Cycle,ymin=pH-sd, ymax=pH+sd),
+                colour="black", width=.15) +
+  geom_point(data = tgc, aes(x=Cycle, y=pH), color = "black", fill = "black", size=4)+
+  ggtitle("pH")
+
+#################################################################################
+#EC
+
+EC.plot = 
+ggplot() + 
+  geom_rect(data = rects, aes(xmin = xstart, xmax = xend, ymin = -Inf,
+                              ymax = Inf, fill = Condition),
+                              fill = rects$Colors, alpha = 0.6) +
+  geom_line(data = tgc2, aes(x=Cycle, y=EC, color=Soil), alpha = 0.9, color = "black") +
+  geom_errorbar(data = tgc2,
+                aes(x=Cycle,ymin=EC-sd, ymax=EC+sd),
+                colour="black", width=.15) +
+  geom_point(data = tgc2, aes(x=Cycle, y=EC), color = "black", fill = "black", size=4)+
+  ggtitle("Electrical Conductivity")
+
+#plotting both
+pH.plot
+EC.plot
+
+```
+
+Those plots will compose a figure with alpha diversity.
+
+### Dada2 pipeline was made on a separeted routine. Please see "dada2_pipeline" file to more details.
+
+Here we will use the dada2 resulting files with the seqtab and the tax table to downstream analysis.
+
+#Fourth step: importing files into a phyloseq object
+
+```{r}
+
+library(phyloseq)
+
+seqtab = readRDS("seqtab_final_new.rds")
+taxa = readRDS("taxtable_new.rds")
+map <- "mapall2.txt"
+
+ps <- phyloseq(otu_table(seqtab, taxa_are_rows=FALSE), tax_table(taxa))
+
+sample_metadata = import_qiime_sample_data(map)
+
+input =merge_phyloseq(ps, sample_metadata)
+input
+
+input.hc = subset_samples(input, Soil == "HighCarbon")
+
+```
+
+Everything looks fine.
+
+#Fifth step: Inspctioning phyloseq object
+
+```{r}
+
+microbiome::summarize_phyloseq(input.hc)
+
+```
+
+#Sixth step: Read distribution and Good's Coverage
+
+```{r}
+
+#Reads distribution
+
+library(data.table)
+library(knitr)
+
+sdt = data.table(as(sample_data(input.hc), "data.frame"),
+                 TotalReads = sample_sums(input.hc), keep.rownames = TRUE)
+
+#Coverage calculation
+#Normal calculations use singletons. As singletons are commonly excluded in dada2 pipeline, 
+# I changed the function to include ASVs with abundance equal to 2.
+
+Good <-function (a) {
+  freq.one <-colSums((a)==2)
+  freq.one
+  num.seq<-colSums(a)
+  num.seq.mat<-as.matrix(num.seq)
+  nseq<-num.seq.mat
+  good.res<-(1-(freq.one/nseq))
+  good.res
+  return(good.res)
+}
+
+Coverage=Good(t(otu_table(ps)))
+
+tab1= cbind(sdt,Coverage)
+names(tab1)[names(tab1) == "V1"] <- "Coverage"
+
+#Showing the results
+kable(tab1[ ,-c(1)], caption = "Distribution of reads per sample")
+
+```
+
+#Seventh step: Rarefaction and Compositional transformation
+
+Some analysis will demand rarefacted data. Other ones, will demand clr-transformed. Here we early prepare both.
+
+```{r}
+
+set.seed(2125)
+
+#Minimum sample size is 2975; input is the initial phyloseq object.
+#Rarefaction
+inputR = rarefy_even_depth(input.hc, sample.size = 5011, replace = FALSE)
+inputR
+
+#transform to compositional
+#clr tranformation -- comes with a pseudocount to avoid zeros.
+rice.comp <- microbiome::transform(input.hc, "clr")
+rice.comp
+
+```
+
+#Eight step: Alpha diversity
+
+First the calculations
+
+```{r}
+
+#Calculating Alpha Diversity
+
+observed=microbiome::alpha(inputR, index = "all")
+meta=microbiome::meta(inputR)
+
+#Creating a file to plot a graph
+alpha= cbind(observed,meta)
+
+#And finally the plot
+
+tgc3 <- summarySE(alpha, measurevar="observed", groupvars=c("Soil","Condition","Cycle"))
+
+alpha.plot = 
+  ggplot() + 
+  geom_rect(data = rects, aes(xmin = xstart, xmax = xend, ymin = -Inf,
+                              ymax = Inf, fill = Condition),
+                              fill = rects$Colors, alpha = 0.6) +
+  geom_line(data = tgc3, aes(x=Cycle, y=observed, color=Soil), alpha = 0.9, color = "black") +
+  geom_errorbar(data = tgc3,
+                aes(x=Cycle,ymin=observed-sd, ymax=observed+sd),
+                colour="black", width=.15) +
+  geom_point(data = tgc3, aes(x=Cycle, y=observed), color = "black", fill = "black", size=4)+
+  ggtitle("Richness of Species")
+
+alpha.plot
+
+###### testing for dominance #######
+
+tgc4 <- summarySE(alpha, measurevar="dominance_simpson", groupvars=c("Soil","Condition","Cycle"))
+
+colnames(tgc4)[5] = "invSimp"
+
+inv.plot = 
+  ggplot() + 
+  geom_rect(data = rects, aes(xmin = xstart, xmax = xend, ymin = -Inf,
+                              ymax = Inf, fill = Condition),
+                              fill = rects$Colors, alpha = 0.6) +
+  geom_line(data = tgc4, aes(x=Cycle, y=invSimp, color=Soil), alpha = 0.9, color = "black") +
+  geom_errorbar(data = tgc4,
+                aes(x=Cycle,ymin=invSimp-ci, ymax=invSimp+ci),
+                colour="black", width=.15) +
+  geom_point(data = tgc4, aes(x=Cycle, y=invSimp), color = "black", fill = "black", size=4)+
+  ggtitle("Dominance of Species")
+
+inv.plot
+
+### Increase in diversity accompanying stress in the media. Mendes et al already showed that in the past.
+
+```
+
+#Ninth step: plotting pH, EC and alpha diversity togther
+
+```{r}
+
+d = ggpubr::ggarrange(pH.plot, EC.plot, alpha.plot, inv.plot, ncol=2, nrow = 2, 
+                       labels = c("A.","B.", "C.", "D."), align = "hv", common.legend = TRUE)
+d
+
+#dev.print(tiff, "Fig1.tiff", width = 9, height = 6, units = "in", res = 600)
+```
+#Tenth step: beta diversity
+
+```{r}
+
+
+# Ploting beta diversity graph
+
+#For different cycles
+
+green_colors <- c("#004d00", "#006600", "#007f00", "#009900", "#00b300", "#00cc00",
+                  "#00e600", "#1aff1a", "#4dff4d", "#80ff80", "#b3ffb3")
+green_colors_reversed <- c("#b3ffb3", "#80ff80", "#4dff4d", "#1aff1a", "#00e600", "#00cc00",
+                           "#00b300", "#009900", "#007f00", "#006600", "#004d00")
+
+
+
+
+input_ord = ordinate(rice.comp, "PCoA" , "euclidean") 
+p3 = plot_ordination(rice.comp, input_ord,
+                     color = 'Condition', title = "Treatment | R-squared = 0.37, p = 0.002")  +
+  scale_color_manual(values = green_colors_reversed)
+p1 = p3 + geom_point(aes(shape = Treatment, fill = Condition, color = Condition), size = 6, alpha = 0.8) +
+  scale_fill_manual(values = green_colors, aesthetics = "fill") +
+  theme(legend.position = "right", legend.title = element_blank())
+
+p1
+
+#dev.print(tiff, "./Figures/permanova_shading6x6.tiff",width = 9, height = 6, units = "in", res = 600, compression = "lzw")
+
+```
+
+#Tenth step: calculating the size of variance in beta diversity by permanova
+
+```{r}
+
+#permanova
+library(vegan)
+
+df = as(sample_data(rice.comp), "data.frame")
+ds = phyloseq::distance(rice.comp, method = "euclidean")
+permanova = adonis2(ds ~ Condition*Treatment, data = df, permutations = 999)
+
+library(knitr)
+kable(permanova, caption = "PERMANOVA - Condition*Soil")
+
+
+df = as(sample_data(rice.comp), "data.frame")
+ds = phyloseq::distance(rice.comp, method = "euclidean")
+permanova = adonis2(ds ~ Stage, data = df, permutations = 999)
+
+library(knitr)
+kable(permanova, caption = "PERMANOVA - Stage")
+
+
+```
+
+It seems the soil type influences a lot in the data. Let's break the dataset into two other ones.
+
+It seem that the microbiota is highly resilient.
+
+#Eleventh step: Microbial distributtion of phyla during the cycles
+
+```{r}
+
+#GHC
+top20 <- names(sort(taxa_sums(input.hc), decreasing=TRUE))[1:20]
+ps.top20 <- transform_sample_counts(input.hc, function(input.hc) input.hc/sum(input.hc))
+ps.top20 <- prune_taxa(top20, ps.top20)
+plot_bar(ps.top20, x="NAMES", fill="Order") + facet_wrap(~Condition, scales="free_x")
+
+```
+
+
+###aphyla abundance
+
+```{r}
+dataset = phyloseq2meco(input.hc)
+dataset$tax_table %<>% tidy_taxonomy
+dataset$cal_abund()
+t1 <- trans_abund$new(dataset = dataset, taxrank = "Phylum", ntaxa = 9)
+t1$plot_bar(others_color = "grey80", facet = "Condition", xtext_keep = FALSE, legend_text_italic = FALSE)
+p <- t1$plot_bar(use_alluvium = TRUE, clustering = TRUE, xtext_angle = 30, xtext_size = 3, color_values = RColorBrewer::brewer.pal(9, "Set2"))
+p
+
+#dev.print(tiff, "Fig3.tiff", width = 14, height = 6, units = "in", res = 600)
+```
+```{r}
+# show 40 taxa at Genus level
+t1 <- trans_abund$new(dataset = dataset, taxrank = "Genus", ntaxa = 40)
+g1 <- t1$plot_heatmap(facet = "Condition", xtext_keep = FALSE, withmargin = FALSE, plot_breaks = c(0.01, 0.1, 1, 10))
+g1
+g1 + theme(axis.text.y = element_text(face = 'italic'))
+
+```
+```{r}
+t1 <- trans_abund$new(dataset = dataset, taxrank = "Phylum", ntaxa = 9, groupmean = "Treatment")
+t1$plot_donut(label = FALSE)
+t1$plot_donut(label = TRUE)
+```
+No differences between drained and flooded
+
+```{r}
+t3 <- trans_func$new(dataset)
+t3$cal_spe_func(prok_database = "FAPROTAX")
+t3$cal_spe_func_perc(abundance_weighted = TRUE)
+t3$trans_spe_func_perc()
+t3$plot_spe_func_perc()
+
+map.hc <- as.data.frame(sample_data(input.hc))
+
+genes = cbind(as.data.frame(t3$res_spe_func_perc), map.hc)
+genes$Cycle <- as.numeric(genes$Cycle)
+genes$EC <- as.numeric(genes$EC)
+genes$pH <- as.numeric(genes$pH)
+
+num.vars = genes[, -c(55:59, 61, 62, 65)]
+
+M = cor(num.vars)
+corrplot(M, order = 'hclust', addrect = 2, tl.cex = 0.1)
+
+testRes = cor.mtest(num.vars, conf.level = 0.95)
+
+## specialized the insignificant value according to the significant level
+corrplot(M, p.mat = testRes$p, method = 'circle', type = 'lower', insig='blank', tl.srt = 45,
+         addCoef.col ='black', number.cex = 0.2, order = 'AOE', diag=FALSE, tl.cex = 0.5)
+```
+
+####Timelapse of functions
+
+```{r}
+colnames(genes)
+selgenes = genes[,c(1, 5, 7, 10, 17, 20, 22, 26, 35, 51, 52, 59, 60, 62)]
+genes.hc = reshape2::melt(selgenes, id.vars = c("Cycle", "Treatment", "Condition"),
+                          variable.name = "Process")
+tgc9 <- summarySE(genes.hc, measurevar="value", groupvars=c("Process","Cycle"))
+gen.hc.plot = 
+  ggplot() + 
+  geom_rect(data = rects, aes(xmin = xstart, xmax = xend, ymin = -Inf,
+                              ymax = Inf, fill = Condition),
+            fill = rects$Colors, alpha = 0.6) +
+  scale_x_continuous(breaks = seq(1, 11, 1), limits=c(0.5, 11.5)) + 
+  scale_y_continuous(breaks = seq(0, 3, 1), limits=c(-0.2, 3.2)) + 
+  geom_line(data = tgc9, aes(x=Cycle, y=value, color=Process), alpha = 0.9) +
+  geom_point(data = tgc9, aes(x=Cycle, y=value, color=Process), alpha = 0.9, size=4)+
+  scale_color_manual(values = c("#de0031",
+"#4bd70f",
+"#d254ff",
+"#004c02",
+"#7800a7",
+"#f6bd57",
+"#7b72ff",
+"#b73400",
+"#0084ce",
+"#ff80b3",
+"#470037")) +
+  labs(y="Percentage Abundance")
+gen.hc.plot 
+
+#dev.print(tiff, "Fig4.tiff", width = 9, height = 6, units = "in", res = 600)
+
+```
+
+
+
+####ALDEx2
+#Initial to Final
+
+```{r}
+#HighCarbon initial to final
+f1t11 = subset_samples(input.hc, Cycle == "1" | Cycle == "11")
+sam1.11 = microbiome::aggregate_rare(f1t11, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi1.11    = as.data.frame((otu_table(sam1.11)))
+var1.11   = sample_data(sam1.11)
+treat1.11 = var1.11$Condition
+x1.11 <- aldex(mi1.11, treat1.11, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax1.11 = subset_taxa(tax_table(sam1.11), Genus != "Other")
+aldex1.11 = cbind(x1.11, tax1.11)
+res1.11=(aldex1.11[(aldex1.11$wi.eBH<="0.01"),])
+res1.11
+
+```
+
+#ALDEx2 cycle to cycle
+
+```{r}
+# 1 to 2
+f1t2 = subset_samples(input.hc, Cycle == "1" | Cycle == "2")
+sam1.2 = microbiome::aggregate_rare(f1t2, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi1.2    = as.data.frame((otu_table(sam1.2)))
+var1.2   = sample_data(sam1.2)
+treat1.2 = var1.2$Condition
+x1.2 <- aldex(mi1.2, treat1.2, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax1.2 = subset_taxa(tax_table(sam1.2), Genus != "Other")
+aldex1.2 = cbind(x1.2, tax1.2)
+res1.2=(aldex1.2[(aldex1.2$wi.eBH<="0.01"),])
+kable(res1.2[,c(1:3, 13,14,18)], caption = "Cycle 1 to 2")
+# Flooding increases Terracidophilus and only Terracidophilus
+
+
+# 2 to 3
+f2t3 = subset_samples(input.hc, Cycle == "2" | Cycle == "3")
+sam2.3 = microbiome::aggregate_rare(f2t3, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi2.3    = as.data.frame((otu_table(sam2.3)))
+var2.3   = sample_data(sam2.3)
+treat2.3 = var2.3$Condition
+x2.3 <- aldex(mi2.3, treat2.3, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax2.3 = subset_taxa(tax_table(sam2.3), Genus != "Other")
+aldex2.3 = cbind(x2.3, tax2.3)
+res2.3=(aldex2.3[(aldex2.3$wi.eBH<="0.01"),])
+kable(res2.3[,c(1:3, 13,14,18)], caption = "Cycle 2 to 3")
+#Terracidaphilus mentioned again
+
+
+# 3 to 4
+f3t4 = subset_samples(input.hc, Cycle == "4" | Cycle == "3")
+sam3.4 = microbiome::aggregate_rare(f3t4, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi3.4    = as.data.frame((otu_table(sam3.4)))
+var3.4   = sample_data(sam3.4)
+treat3.4 = var3.4$Condition
+x3.4 <- aldex(mi3.4, treat3.4, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax3.4 = subset_taxa(tax_table(sam3.4), Genus != "Other")
+aldex3.4 = cbind(x3.4, tax3.4)
+res3.4=(aldex3.4[(aldex3.4$wi.eBH<="0.01"),])
+kable(res3.4[,c(1:3, 13,14,18)], caption = "Cycle 3 to 4")
+#Nothing
+
+
+# 4 to 5
+f4t5 = subset_samples(input.hc, Cycle == "4" | Cycle == "5")
+sam4.5 = microbiome::aggregate_rare(f4t5, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi4.5    = as.data.frame((otu_table(sam4.5)))
+var4.5   = sample_data(sam4.5)
+treat4.5 = var4.5$Condition
+x4.5 <- aldex(mi4.5, treat4.5, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax4.5 = subset_taxa(tax_table(sam4.5), Genus != "Other")
+aldex4.5 = cbind(x4.5, tax4.5)
+res4.5=(aldex4.5[(aldex4.5$wi.eBH<="0.01"),])
+kable(res4.5[,c(1:3, 13,14,18)], caption = "Cycle 4 to 5")
+#Panacagrimonas (?) and Rhodoblastus (bless you) decreasing
+
+
+# 5 to 6
+f5t6 = subset_samples(input.hc, Cycle == "6" | Cycle == "5")
+sam5.6 = microbiome::aggregate_rare(f5t6, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi5.6    = as.data.frame((otu_table(sam5.6)))
+var5.6   = sample_data(sam5.6)
+treat5.6 = var5.6$Condition
+x5.6 <- aldex(mi5.6, treat5.6, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax5.6 = subset_taxa(tax_table(sam5.6), Genus != "Other")
+aldex5.6 = cbind(x5.6, tax5.6)
+res5.6=(aldex5.6[(aldex5.6$wi.eBH<="0.01"),])
+kable(res5.6[,c(1:3, 13,14,18)], caption = "Cycle 5 to 6")
+#Increasin in Actinoplanes
+
+
+# 6 to 7
+f6t7 = subset_samples(input.hc, Cycle == "6" | Cycle == "7")
+sam6.7 = microbiome::aggregate_rare(f6t7, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi6.7    = as.data.frame((otu_table(sam6.7)))
+var6.7   = sample_data(sam6.7)
+treat6.7 = var6.7$Condition
+x6.7 <- aldex(mi6.7, treat6.7, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax6.7 = subset_taxa(tax_table(sam6.7), Genus != "Other")
+aldex6.7 = cbind(x6.7, tax6.7)
+res6.7=(aldex6.7[(aldex6.7$wi.eBH<="0.01"),])
+kable(res6.7[,c(1:3, 13,14,18)], caption = "Cycle 6 to 7")
+# DA in weird taxa
+
+
+# 7 to 8
+f7t8 = subset_samples(input.hc, Cycle == "8" | Cycle == "7")
+sam7.8 = microbiome::aggregate_rare(f7t8, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi7.8    = as.data.frame((otu_table(sam7.8)))
+var7.8   = sample_data(sam7.8)
+treat7.8 = var7.8$Condition
+x7.8 <- aldex(mi7.8, treat7.8, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax7.8 = subset_taxa(tax_table(sam7.8), Genus != "Other")
+aldex7.8 = cbind(x7.8, tax7.8)
+res7.8=(aldex7.8[(aldex7.8$wi.eBH<="0.01"),])
+kable(res7.8[,c(1:3, 13,14,18)], caption = "Cycle 7 to 8")
+#Nothing
+
+
+# 8 to 9
+f8t9 = subset_samples(input.hc, Cycle == "8" | Cycle == "9")
+sam8.9 = microbiome::aggregate_rare(f8t9, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi8.9    = as.data.frame((otu_table(sam8.9)))
+var8.9   = sample_data(sam8.9)
+treat8.9 = var8.9$Condition
+x8.9 <- aldex(mi8.9, treat8.9, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax8.9 = subset_taxa(tax_table(sam8.9), Genus != "Other")
+aldex8.9 = cbind(x8.9, tax8.9)
+res8.9=(aldex8.9[(aldex8.9$wi.eBH<="0.01"),])
+kable(res8.9[,c(1:3, 13,14,18)], caption = "Cycle 8 to 9")
+#Nothing
+
+
+# 9 to 10
+f9t10 = subset_samples(input.hc, Cycle == "9" | Cycle == "10")
+sam9.10 = microbiome::aggregate_rare(f9t10, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi9.10    = as.data.frame((otu_table(sam9.10)))
+var9.10   = sample_data(sam9.10)
+treat9.10 = var9.10$Condition
+x9.10 <- aldex(mi9.10, treat9.10, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax9.10 = subset_taxa(tax_table(sam9.10), Genus != "Other")
+aldex9.10 = cbind(x9.10, tax9.10)
+res9.10=(aldex9.10[(aldex9.10$wi.eBH<="0.01"),])
+kable(res9.10[,c(1:3, 13,14,18)], caption = "Cycle 9 to 10")
+#Nothing
+
+
+# 10 to 11
+f10t11 = subset_samples(input.hc, Cycle == "11" | Cycle == "10")
+sam10.11 = microbiome::aggregate_rare(f10t11, level = "Genus",
+                                     detection = 1/100, prevalence = 1/100)
+mi10.11    = as.data.frame((otu_table(sam10.11)))
+var10.11   = sample_data(sam10.11)
+treat10.11 = var10.11$Condition
+x10.11 <- aldex(mi10.11, treat10.11, mc.samples=128, test="t", effect=TRUE,
+               include.sample.summary=TRUE, denom="zero", verbose=TRUE)
+#Aldex do not include the "other" taxa
+tax10.11 = subset_taxa(tax_table(sam10.11), Genus != "Other")
+aldex10.11 = cbind(x10.11, tax10.11)
+res10.11=(aldex10.11[(aldex10.11$wi.eBH<="0.01"),])
+kable(res10.11[,c(1:3, 13,14,18)], caption = "Cycle 10 to 11")
+#Nothing
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
